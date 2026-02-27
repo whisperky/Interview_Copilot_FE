@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { getHealthSnapshot, type HealthSnapshot } from './lib/http/healthClient'
 import {
   type ServerWsMessage,
-  type SessionPreferences,
   WS_EVENT_TYPES,
 } from './lib/contracts/protocol'
 import { runProtocolSelfTest } from './lib/contracts/selfTest'
-import { WsSessionClient, type SessionConnectionStatus } from './lib/ws/sessionClient'
+import { WsSessionClient } from './lib/ws/sessionClient'
+import { useSessionStore } from './store/sessionStore'
 
 function App() {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
@@ -27,26 +27,21 @@ function App() {
     ready: false,
     degraded: true,
   })
-  const [connectionStatus, setConnectionStatus] = useState<SessionConnectionStatus>('idle')
-  const [retryCount, setRetryCount] = useState(0)
-  const [lastError, setLastError] = useState<string | null>(null)
-  const [lastServerEvent, setLastServerEvent] = useState<string>('none')
-  const [resumeContext, setResumeContext] = useState('')
   const [testTranscript, setTestTranscript] = useState('What is your biggest strength?')
-  const [audioMode, setAudioMode] = useState('idle')
-  const [audioStreamActive, setAudioStreamActive] = useState(false)
-  const [audioBytesSent, setAudioBytesSent] = useState(0)
-  const [audioChunksSent, setAudioChunksSent] = useState(0)
-  const [audioChunksDropped, setAudioChunksDropped] = useState(0)
-  const [audioWarning, setAudioWarning] = useState<string | null>(null)
-
-  const [preferences, setPreferences] = useState<SessionPreferences>({
-    tone: 'confident',
-    max_seconds: 60,
-    include_example: true,
-    technical_mode: false,
-    simplify_english: false,
-  })
+  const connection = useSessionStore((state) => state.connection)
+  const session = useSessionStore((state) => state.session)
+  const transcript = useSessionStore((state) => state.transcript)
+  const answer = useSessionStore((state) => state.answer)
+  const audio = useSessionStore((state) => state.audio)
+  const lastServerEvent = useSessionStore((state) => state.lastServerEvent)
+  const setConnectionStatus = useSessionStore((state) => state.setConnectionStatus)
+  const setConnectionError = useSessionStore((state) => state.setConnectionError)
+  const setPreferenceField = useSessionStore((state) => state.setPreferenceField)
+  const setAudioStatus = useSessionStore((state) => state.setAudioStatus)
+  const recordAudioChunkSent = useSessionStore((state) => state.recordAudioChunkSent)
+  const recordAudioChunkDropped = useSessionStore((state) => state.recordAudioChunkDropped)
+  const applyServerMessage = useSessionStore((state) => state.applyServerMessage)
+  const setResumeContext = useSessionStore((state) => state.setResumeContext)
 
   useEffect(() => {
     let isMounted = true
@@ -69,23 +64,20 @@ function App() {
   useEffect(() => {
     if (!hasDesktopApi) return
     void window.desktop.getAudioStatus().then((status) => {
-      setAudioMode(status.mode)
-      setAudioStreamActive(status.mode !== 'idle')
+      setAudioStatus(status.mode, status.mode !== 'idle', status.warning ?? null)
     })
-  }, [hasDesktopApi])
+  }, [hasDesktopApi, setAudioStatus])
 
   useEffect(() => {
     const client = clientRef.current
     if (!client) return
 
     const unStatus = client.onStatus((event) => {
-      setConnectionStatus(event.status)
-      setRetryCount(event.attempt)
-      if (event.error) setLastError(event.error)
+      setConnectionStatus(event.status, event.attempt, event.error)
     })
-    const unError = client.onError((error) => setLastError(error))
+    const unError = client.onError((error) => setConnectionError(error))
     const unMessage = client.onMessage((message: ServerWsMessage) => {
-      setLastServerEvent(formatServerEvent(message))
+      applyServerMessage(message, formatServerEvent(message))
     })
 
     return () => {
@@ -94,7 +86,7 @@ function App() {
       unMessage()
       client.disconnect()
     }
-  }, [])
+  }, [applyServerMessage, setConnectionError, setConnectionStatus])
 
   useEffect(() => {
     if (!hasDesktopApi) return
@@ -104,16 +96,15 @@ function App() {
         payload: chunk.payload,
       })
       if (sent) {
-        setAudioBytesSent((prev) => prev + chunk.byteLength)
-        setAudioChunksSent((prev) => prev + 1)
+        recordAudioChunkSent(chunk.byteLength)
       } else {
-        setAudioChunksDropped((prev) => prev + 1)
+        recordAudioChunkDropped()
       }
     })
     return () => {
       unsubscribe()
     }
-  }, [hasDesktopApi])
+  }, [hasDesktopApi, recordAudioChunkDropped, recordAudioChunkSent])
 
   const onToggleTop = async () => {
     if (!hasDesktopApi) return
@@ -139,21 +130,21 @@ function App() {
   const sendPreferences = () => {
     const sent = clientRef.current?.send({
       type: WS_EVENT_TYPES.preferences,
-      ...preferences,
+      ...session.preferences,
     })
     if (!sent) {
-      setLastError('Preferences queued until WebSocket reconnects')
+      setConnectionError('Preferences queued until WebSocket reconnects')
     }
   }
 
   const sendResumeContext = () => {
-    if (!resumeContext.trim()) return
+    if (!session.resumeContext.trim()) return
     const sent = clientRef.current?.send({
       type: WS_EVENT_TYPES.resumeContext,
-      text: resumeContext,
+      text: session.resumeContext,
     })
     if (!sent) {
-      setLastError('Resume context queued until WebSocket reconnects')
+      setConnectionError('Resume context queued until WebSocket reconnects')
     }
   }
 
@@ -173,16 +164,13 @@ function App() {
   const startAudioStream = async () => {
     if (!hasDesktopApi) return
     const status = await window.desktop.startAudioStream()
-    setAudioMode(status.mode)
-    setAudioStreamActive(status.mode !== 'idle')
-    setAudioWarning(status.warning ?? null)
+    setAudioStatus(status.mode, status.mode !== 'idle', status.warning ?? null)
   }
 
   const stopAudioStream = async () => {
     if (!hasDesktopApi) return
     const status = await window.desktop.stopAudioStream()
-    setAudioMode(status.mode)
-    setAudioStreamActive(false)
+    setAudioStatus(status.mode, false)
   }
 
   return (
@@ -271,17 +259,17 @@ function App() {
               <span className={`rounded px-2 py-1 ${health.ready ? 'bg-emerald-900 text-emerald-200' : 'bg-amber-900 text-amber-200'}`}>
                 health: {health.ready ? 'ready' : 'degraded'}
               </span>
-              <span className={`rounded px-2 py-1 ${connectionStatus === 'connected' ? 'bg-emerald-900 text-emerald-200' : 'bg-zinc-800 text-zinc-200'}`}>
-                ws: {connectionStatus}
+              <span className={`rounded px-2 py-1 ${connection.status === 'connected' ? 'bg-emerald-900 text-emerald-200' : 'bg-zinc-800 text-zinc-200'}`}>
+                ws: {connection.status}
               </span>
             </div>
           </div>
 
           <p className="text-zinc-500">
-            retries: {retryCount} | last event: {lastServerEvent}
+            retries: {connection.retries} | last event: {lastServerEvent}
           </p>
           {health.error && <p className="text-amber-300">health error: {health.error}</p>}
-          {lastError && <p className="text-red-300">ws error: {lastError}</p>}
+          {connection.lastError && <p className="text-red-300">ws error: {connection.lastError}</p>}
 
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -304,8 +292,8 @@ function App() {
             <p className="text-zinc-400">Session preferences</p>
             <select
               className="w-full rounded bg-zinc-900 px-2 py-1"
-              onChange={(e) => setPreferences((prev) => ({ ...prev, tone: e.target.value as SessionPreferences['tone'] }))}
-              value={preferences.tone}
+              onChange={(e) => setPreferenceField('tone', e.target.value as typeof session.preferences.tone)}
+              value={session.preferences.tone}
             >
               <option value="confident">confident</option>
               <option value="casual">casual</option>
@@ -315,32 +303,32 @@ function App() {
               className="w-full"
               max={120}
               min={15}
-              onChange={(e) => setPreferences((prev) => ({ ...prev, max_seconds: Number(e.target.value) }))}
+              onChange={(e) => setPreferenceField('max_seconds', Number(e.target.value))}
               type="range"
-              value={preferences.max_seconds}
+              value={session.preferences.max_seconds}
             />
-            <p className="text-zinc-500">max_seconds: {preferences.max_seconds}</p>
+            <p className="text-zinc-500">max_seconds: {session.preferences.max_seconds}</p>
             <label className="flex items-center justify-between">
               include_example
               <input
-                checked={preferences.include_example}
-                onChange={(e) => setPreferences((prev) => ({ ...prev, include_example: e.target.checked }))}
+                checked={session.preferences.include_example}
+                onChange={(e) => setPreferenceField('include_example', e.target.checked)}
                 type="checkbox"
               />
             </label>
             <label className="flex items-center justify-between">
               technical_mode
               <input
-                checked={preferences.technical_mode}
-                onChange={(e) => setPreferences((prev) => ({ ...prev, technical_mode: e.target.checked }))}
+                checked={session.preferences.technical_mode}
+                onChange={(e) => setPreferenceField('technical_mode', e.target.checked)}
                 type="checkbox"
               />
             </label>
             <label className="flex items-center justify-between">
               simplify_english
               <input
-                checked={preferences.simplify_english}
-                onChange={(e) => setPreferences((prev) => ({ ...prev, simplify_english: e.target.checked }))}
+                checked={session.preferences.simplify_english}
+                onChange={(e) => setPreferenceField('simplify_english', e.target.checked)}
                 type="checkbox"
               />
             </label>
@@ -356,7 +344,7 @@ function App() {
               onChange={(e) => setResumeContext(e.target.value)}
               placeholder="Paste short resume context..."
               rows={3}
-              value={resumeContext}
+              value={session.resumeContext}
             />
             <button className="w-full rounded bg-blue-700 px-2 py-1 hover:bg-blue-600" onClick={sendResumeContext} type="button">
               Send Resume Context
@@ -384,16 +372,16 @@ function App() {
         <section className="space-y-3 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
           <div className="flex items-center justify-between">
             <p className="text-zinc-400">Phase 4: Audio Stream Pipeline</p>
-            <span className={`rounded px-2 py-1 ${audioStreamActive ? 'bg-emerald-900 text-emerald-200' : 'bg-zinc-800 text-zinc-200'}`}>
-              audio: {audioMode}
+            <span className={`rounded px-2 py-1 ${audio.active ? 'bg-emerald-900 text-emerald-200' : 'bg-zinc-800 text-zinc-200'}`}>
+              audio: {audio.mode}
             </span>
           </div>
 
           <p className="text-zinc-500">
-            bytes sent: {audioBytesSent} | chunks sent: {audioChunksSent} | chunks dropped: {audioChunksDropped}
+            bytes sent: {audio.bytesSent} | chunks sent: {audio.chunksSent} | chunks dropped: {audio.chunksDropped}
           </p>
-          {audioWarning && <p className="text-amber-300">{audioWarning}</p>}
-          {connectionStatus !== 'connected' && (
+          {audio.warning && <p className="text-amber-300">{audio.warning}</p>}
+          {connection.status !== 'connected' && (
             <p className="text-amber-300">
               WebSocket is not connected. Audio chunks will be dropped until WS reconnects.
             </p>
@@ -402,7 +390,7 @@ function App() {
           <div className="grid grid-cols-2 gap-2">
             <button
               className="rounded bg-emerald-700 px-2 py-1 hover:bg-emerald-600 disabled:opacity-50"
-              disabled={!hasDesktopApi || audioStreamActive}
+              disabled={!hasDesktopApi || audio.active}
               onClick={() => {
                 void startAudioStream()
               }}
@@ -412,7 +400,7 @@ function App() {
             </button>
             <button
               className="rounded bg-zinc-700 px-2 py-1 hover:bg-zinc-600 disabled:opacity-50"
-              disabled={!hasDesktopApi || !audioStreamActive}
+              disabled={!hasDesktopApi || !audio.active}
               onClick={() => {
                 void stopAudioStream()
               }}
@@ -421,6 +409,16 @@ function App() {
               Stop Audio
             </button>
           </div>
+        </section>
+
+        <section className="space-y-1 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+          <p className="text-zinc-400">Phase 5: Zustand Orchestration</p>
+          <p>detected question: {session.detectedQuestion ?? 'none'}</p>
+          <p>question category: {session.detectedCategory ?? 'none'}</p>
+          <p>interim transcript: {transcript.interimText || 'none'}</p>
+          <p>final transcript segments: {transcript.finalSegments.length}</p>
+          <p>answer streaming: {answer.isStreaming ? 'yes' : 'no'}</p>
+          <p>answer history: {answer.history.length}</p>
         </section>
       </main>
     </div>
