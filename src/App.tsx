@@ -33,6 +33,12 @@ function App() {
   const [lastServerEvent, setLastServerEvent] = useState<string>('none')
   const [resumeContext, setResumeContext] = useState('')
   const [testTranscript, setTestTranscript] = useState('What is your biggest strength?')
+  const [audioMode, setAudioMode] = useState('idle')
+  const [audioStreamActive, setAudioStreamActive] = useState(false)
+  const [audioBytesSent, setAudioBytesSent] = useState(0)
+  const [audioChunksSent, setAudioChunksSent] = useState(0)
+  const [audioChunksDropped, setAudioChunksDropped] = useState(0)
+  const [audioWarning, setAudioWarning] = useState<string | null>(null)
 
   const [preferences, setPreferences] = useState<SessionPreferences>({
     tone: 'confident',
@@ -61,6 +67,14 @@ function App() {
   }, [apiBaseUrl])
 
   useEffect(() => {
+    if (!hasDesktopApi) return
+    void window.desktop.getAudioStatus().then((status) => {
+      setAudioMode(status.mode)
+      setAudioStreamActive(status.mode !== 'idle')
+    })
+  }, [hasDesktopApi])
+
+  useEffect(() => {
     const client = clientRef.current
     if (!client) return
 
@@ -81,6 +95,25 @@ function App() {
       client.disconnect()
     }
   }, [])
+
+  useEffect(() => {
+    if (!hasDesktopApi) return
+    const unsubscribe = window.desktop.onAudioChunk((chunk) => {
+      const sent = clientRef.current?.send({
+        type: WS_EVENT_TYPES.audio,
+        payload: chunk.payload,
+      })
+      if (sent) {
+        setAudioBytesSent((prev) => prev + chunk.byteLength)
+        setAudioChunksSent((prev) => prev + 1)
+      } else {
+        setAudioChunksDropped((prev) => prev + 1)
+      }
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [hasDesktopApi])
 
   const onToggleTop = async () => {
     if (!hasDesktopApi) return
@@ -135,6 +168,21 @@ function App() {
 
   const sendAnswerNow = () => {
     clientRef.current?.send({ type: WS_EVENT_TYPES.answerNow })
+  }
+
+  const startAudioStream = async () => {
+    if (!hasDesktopApi) return
+    const status = await window.desktop.startAudioStream()
+    setAudioMode(status.mode)
+    setAudioStreamActive(status.mode !== 'idle')
+    setAudioWarning(status.warning ?? null)
+  }
+
+  const stopAudioStream = async () => {
+    if (!hasDesktopApi) return
+    const status = await window.desktop.stopAudioStream()
+    setAudioMode(status.mode)
+    setAudioStreamActive(false)
   }
 
   return (
@@ -330,6 +378,48 @@ function App() {
                 Answer Now
               </button>
             </div>
+          </div>
+        </section>
+
+        <section className="space-y-3 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+          <div className="flex items-center justify-between">
+            <p className="text-zinc-400">Phase 4: Audio Stream Pipeline</p>
+            <span className={`rounded px-2 py-1 ${audioStreamActive ? 'bg-emerald-900 text-emerald-200' : 'bg-zinc-800 text-zinc-200'}`}>
+              audio: {audioMode}
+            </span>
+          </div>
+
+          <p className="text-zinc-500">
+            bytes sent: {audioBytesSent} | chunks sent: {audioChunksSent} | chunks dropped: {audioChunksDropped}
+          </p>
+          {audioWarning && <p className="text-amber-300">{audioWarning}</p>}
+          {connectionStatus !== 'connected' && (
+            <p className="text-amber-300">
+              WebSocket is not connected. Audio chunks will be dropped until WS reconnects.
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className="rounded bg-emerald-700 px-2 py-1 hover:bg-emerald-600 disabled:opacity-50"
+              disabled={!hasDesktopApi || audioStreamActive}
+              onClick={() => {
+                void startAudioStream()
+              }}
+              type="button"
+            >
+              Start Audio
+            </button>
+            <button
+              className="rounded bg-zinc-700 px-2 py-1 hover:bg-zinc-600 disabled:opacity-50"
+              disabled={!hasDesktopApi || !audioStreamActive}
+              onClick={() => {
+                void stopAudioStream()
+              }}
+              type="button"
+            >
+              Stop Audio
+            </button>
           </div>
         </section>
       </main>
