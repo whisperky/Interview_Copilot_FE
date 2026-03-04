@@ -53,6 +53,12 @@ interface DiagnosticsSlice {
   connectedSince: string | null
 }
 
+type UiMode = 'user' | 'dev'
+
+interface UiSlice {
+  mode: UiMode
+}
+
 interface SessionStore {
   connection: ConnectionSlice
   session: SessionSlice
@@ -60,6 +66,7 @@ interface SessionStore {
   answer: AnswerSlice
   audio: AudioSlice
   diagnostics: DiagnosticsSlice
+  ui: UiSlice
   lastServerEvent: string
   setConnectionStatus: (status: SessionConnectionStatus, retries: number, error?: string) => void
   setConnectionError: (error: string | null) => void
@@ -72,6 +79,8 @@ interface SessionStore {
   applyServerMessage: (message: ServerWsMessage, formattedEvent: string) => void
   pushDiagnosticEvent: (level: DiagnosticEvent['level'], message: string) => void
   clearDiagnosticEvents: () => void
+  setUiMode: (mode: UiMode) => void
+  hydrateUiMode: () => void
 }
 
 const initialPreferences: SessionPreferences = {
@@ -83,6 +92,7 @@ const initialPreferences: SessionPreferences = {
 }
 
 const MAX_DIAGNOSTIC_EVENTS = 80
+const UI_MODE_STORAGE_KEY = 'interview-copilot-ui-mode'
 
 function createDiagnosticEvent(level: DiagnosticEvent['level'], message: string): DiagnosticEvent {
   const id = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
@@ -127,6 +137,9 @@ export const useSessionStore = create<SessionStore>((set) => ({
     events: [],
     lastStatusChangeAt: null,
     connectedSince: null,
+  },
+  ui: {
+    mode: 'user',
   },
   lastServerEvent: 'none',
   setConnectionStatus: (status, retries, error) =>
@@ -321,5 +334,34 @@ export const useSessionStore = create<SessionStore>((set) => ({
         events: [],
       },
     })),
+  setUiMode: (mode) =>
+    set((state) => {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(UI_MODE_STORAGE_KEY, mode)
+      }
+      return {
+        ui: {
+          mode,
+        },
+        diagnostics: {
+          ...state.diagnostics,
+          events: [
+            ...state.diagnostics.events,
+            createDiagnosticEvent('info', `ui mode -> ${mode}`),
+          ].slice(-MAX_DIAGNOSTIC_EVENTS),
+        },
+      }
+    }),
+  hydrateUiMode: () =>
+    set((state) => {
+      if (typeof window === 'undefined') return state
+      const stored = window.localStorage.getItem(UI_MODE_STORAGE_KEY)
+      const mode: UiMode = stored === 'dev' ? 'dev' : 'user'
+      return {
+        ui: {
+          mode,
+        },
+      }
+    }),
 }))
 

@@ -35,6 +35,7 @@ function App() {
   const answer = useSessionStore((state) => state.answer)
   const audio = useSessionStore((state) => state.audio)
   const diagnostics = useSessionStore((state) => state.diagnostics)
+  const ui = useSessionStore((state) => state.ui)
   const lastServerEvent = useSessionStore((state) => state.lastServerEvent)
   const setConnectionStatus = useSessionStore((state) => state.setConnectionStatus)
   const setConnectionError = useSessionStore((state) => state.setConnectionError)
@@ -46,7 +47,14 @@ function App() {
   const setResumeContext = useSessionStore((state) => state.setResumeContext)
   const pushDiagnosticEvent = useSessionStore((state) => state.pushDiagnosticEvent)
   const clearDiagnosticEvents = useSessionStore((state) => state.clearDiagnosticEvents)
+  const setUiMode = useSessionStore((state) => state.setUiMode)
+  const hydrateUiMode = useSessionStore((state) => state.hydrateUiMode)
   const canSendWs = connection.status === 'connected'
+  const isDevMode = ui.mode === 'dev'
+
+  useEffect(() => {
+    hydrateUiMode()
+  }, [hydrateUiMode])
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1_000)
@@ -193,7 +201,23 @@ function App() {
     <div className="h-screen bg-zinc-950 text-zinc-100">
       <header className="drag-region flex items-center justify-between border-b border-zinc-800 px-3 py-2">
         <div className="text-sm font-medium">Interview Copilot</div>
-        <div className="no-drag flex gap-2">
+        <div className="no-drag flex items-center gap-2">
+          <div className="rounded bg-zinc-900 p-1">
+            <button
+              className={`rounded px-2 py-1 text-xs ${ui.mode === 'user' ? 'bg-zinc-700' : 'hover:bg-zinc-800'}`}
+              onClick={() => setUiMode('user')}
+              type="button"
+            >
+              User
+            </button>
+            <button
+              className={`rounded px-2 py-1 text-xs ${ui.mode === 'dev' ? 'bg-zinc-700' : 'hover:bg-zinc-800'}`}
+              onClick={() => setUiMode('dev')}
+              type="button"
+            >
+              Dev
+            </button>
+          </div>
           <button
             className="rounded bg-zinc-800 px-2 py-1 text-xs hover:bg-zinc-700"
             disabled={!hasDesktopApi}
@@ -214,63 +238,67 @@ function App() {
       </header>
 
       <main className="space-y-4 p-4">
-        <section className="rounded-lg border border-zinc-800 p-3">
-          <p className="mb-2 text-xs text-zinc-400">Window Controls</p>
-          <label className="no-drag flex items-center justify-between text-sm">
-            <span>Always on top</span>
-            <input checked={alwaysOnTop} disabled={!hasDesktopApi} onChange={onToggleTop} type="checkbox" />
-          </label>
-          <label className="no-drag mt-3 block text-sm">
-            <span className="mb-1 block">
-              Opacity (
-              {Math.round(opacity * 100)}
-              %)
-            </span>
-            <input
-              className="w-full"
-              max={1}
-              min={0.35}
-              disabled={!hasDesktopApi}
-              onChange={(e) => onOpacity(Number(e.target.value))}
-              step={0.01}
-              type="range"
-              value={opacity}
-            />
-          </label>
-          {!hasDesktopApi && (
-            <p className="mt-2 text-xs text-amber-300">
-              Electron preload API is unavailable. Run with `npm run dev` to use window controls.
-            </p>
-          )}
-        </section>
+        {isDevMode && (
+          <section className="rounded-lg border border-zinc-800 p-3">
+            <p className="mb-2 text-xs text-zinc-400">Window Controls</p>
+            <label className="no-drag flex items-center justify-between text-sm">
+              <span>Always on top</span>
+              <input checked={alwaysOnTop} disabled={!hasDesktopApi} onChange={onToggleTop} type="checkbox" />
+            </label>
+            <label className="no-drag mt-3 block text-sm">
+              <span className="mb-1 block">
+                Opacity (
+                {Math.round(opacity * 100)}
+                %)
+              </span>
+              <input
+                className="w-full"
+                max={1}
+                min={0.35}
+                disabled={!hasDesktopApi}
+                onChange={(e) => onOpacity(Number(e.target.value))}
+                step={0.01}
+                type="range"
+                value={opacity}
+              />
+            </label>
+            {!hasDesktopApi && (
+              <p className="mt-2 text-xs text-amber-300">
+                Electron preload API is unavailable. Run with `npm run dev` to use window controls.
+              </p>
+            )}
+          </section>
+        )}
 
-        <section className="rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-zinc-400">Phase 2: Contract Self-Check</p>
-            <p className="rounded bg-zinc-800 px-2 py-1">
-              {passedCount}/{testResults.length} passed
-            </p>
-          </div>
-          <ul className="space-y-1">
-            {testResults.map((test) => (
-              <li key={test.name}>
-                <span className={test.ok ? 'text-emerald-300' : 'text-red-300'}>
-                  {test.ok ? 'PASS' : 'FAIL'}
-                </span>
-                {' '}
-                {test.name}
-                <span className="text-zinc-500">
+        {isDevMode && (
+          <section className="rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-zinc-400">Contract Self-Check</p>
+              <p className="rounded bg-zinc-800 px-2 py-1">
+                {passedCount}/{testResults.length} passed
+              </p>
+            </div>
+            <ul className="space-y-1">
+              {testResults.map((test) => (
+                <li key={test.name}>
+                  <span className={test.ok ? 'text-emerald-300' : 'text-red-300'}>
+                    {test.ok ? 'PASS' : 'FAIL'}
+                  </span>
                   {' '}
-                  - {test.details}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+                  {test.name}
+                  <span className="text-zinc-500">
+                    {' '}
+                    - {test.details}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="space-y-3 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
           <div className="flex items-center justify-between">
-            <p className="text-zinc-400">Phase 3: Integration Core</p>
+            <p className="text-zinc-400">Session Controls</p>
             <div className="flex gap-2">
               <span className={`rounded px-2 py-1 ${health.ready ? 'bg-emerald-900 text-emerald-200' : 'bg-amber-900 text-amber-200'}`}>
                 health: {health.ready ? 'ready' : 'degraded'}
@@ -281,9 +309,11 @@ function App() {
             </div>
           </div>
 
-          <p className="text-zinc-500">
-            retries: {connection.retries} | last event: {lastServerEvent}
-          </p>
+          {isDevMode && (
+            <p className="text-zinc-500">
+              retries: {connection.retries} | last event: {lastServerEvent}
+            </p>
+          )}
           {health.error && <p className="text-amber-300">health error: {health.error}</p>}
           {connection.lastError && <p className="text-red-300">ws error: {connection.lastError}</p>}
 
@@ -409,7 +439,7 @@ function App() {
 
         <section className="space-y-3 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
           <div className="flex items-center justify-between">
-            <p className="text-zinc-400">Phase 6: Live Session View</p>
+            <p className="text-zinc-400">Live Copilot</p>
             <span className="rounded bg-zinc-800 px-2 py-1">
               answer {answer.isStreaming ? 'streaming' : 'idle'}
             </span>
@@ -455,7 +485,7 @@ function App() {
 
         <section className="space-y-3 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
           <div className="flex items-center justify-between">
-            <p className="text-zinc-400">Phase 4: Audio Stream Pipeline</p>
+            <p className="text-zinc-400">Audio Capture</p>
             <span className={`rounded px-2 py-1 ${audio.active ? 'bg-emerald-900 text-emerald-200' : 'bg-zinc-800 text-zinc-200'}`}>
               audio: {audio.mode}
             </span>
@@ -495,49 +525,53 @@ function App() {
           </div>
         </section>
 
-        <section className="space-y-1 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
-          <p className="text-zinc-400">Phase 5: Zustand Orchestration</p>
-          <p>detected question: {session.detectedQuestion ?? 'none'}</p>
-          <p>question category: {session.detectedCategory ?? 'none'}</p>
-          <p>interim transcript: {transcript.interimText || 'none'}</p>
-          <p>final transcript segments: {transcript.finalSegments.length}</p>
-          <p>answer streaming: {answer.isStreaming ? 'yes' : 'no'}</p>
-          <p>answer history: {answer.history.length}</p>
-        </section>
+        {isDevMode && (
+          <section className="space-y-1 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+            <p className="text-zinc-400">Store Snapshot</p>
+            <p>detected question: {session.detectedQuestion ?? 'none'}</p>
+            <p>question category: {session.detectedCategory ?? 'none'}</p>
+            <p>interim transcript: {transcript.interimText || 'none'}</p>
+            <p>final transcript segments: {transcript.finalSegments.length}</p>
+            <p>answer streaming: {answer.isStreaming ? 'yes' : 'no'}</p>
+            <p>answer history: {answer.history.length}</p>
+          </section>
+        )}
 
-        <section className="space-y-2 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
-          <div className="flex items-center justify-between">
-            <p className="text-zinc-400">Phase 7: Reliability and Observability</p>
-            <button
-              className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700"
-              onClick={clearDiagnosticEvents}
-              type="button"
-            >
-              Clear Logs
-            </button>
-          </div>
-          <p className="text-zinc-500">
-            last status change: {formatIsoTime(diagnostics.lastStatusChangeAt)}
-            {' '}| connected for:{' '}
-            {formatDuration(diagnostics.connectedSince, nowMs)}
-          </p>
-          <div className="max-h-32 space-y-1 overflow-auto rounded border border-zinc-800 p-2">
-            {diagnostics.events.length === 0 && (
-              <p className="text-zinc-500">No events yet.</p>
-            )}
-            {diagnostics.events.slice(-25).map((event) => (
-              <p key={event.id}>
-                <span className={event.level === 'error' ? 'text-red-300' : event.level === 'warn' ? 'text-amber-300' : 'text-emerald-300'}>
-                  {event.level.toUpperCase()}
-                </span>
-                {' '}
-                <span className="text-zinc-500">[{formatIsoTime(event.timestamp)}]</span>
-                {' '}
-                {event.message}
-              </p>
-            ))}
-          </div>
-        </section>
+        {isDevMode && (
+          <section className="space-y-2 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+            <div className="flex items-center justify-between">
+              <p className="text-zinc-400">Reliability and Observability</p>
+              <button
+                className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700"
+                onClick={clearDiagnosticEvents}
+                type="button"
+              >
+                Clear Logs
+              </button>
+            </div>
+            <p className="text-zinc-500">
+              last status change: {formatIsoTime(diagnostics.lastStatusChangeAt)}
+              {' '}| connected for:{' '}
+              {formatDuration(diagnostics.connectedSince, nowMs)}
+            </p>
+            <div className="max-h-32 space-y-1 overflow-auto rounded border border-zinc-800 p-2">
+              {diagnostics.events.length === 0 && (
+                <p className="text-zinc-500">No events yet.</p>
+              )}
+              {diagnostics.events.slice(-25).map((event) => (
+                <p key={event.id}>
+                  <span className={event.level === 'error' ? 'text-red-300' : event.level === 'warn' ? 'text-amber-300' : 'text-emerald-300'}>
+                    {event.level.toUpperCase()}
+                  </span>
+                  {' '}
+                  <span className="text-zinc-500">[{formatIsoTime(event.timestamp)}]</span>
+                  {' '}
+                  {event.message}
+                </p>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
     </div>
   )

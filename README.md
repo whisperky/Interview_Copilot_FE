@@ -8,6 +8,25 @@ Electron + React + Tailwind v4 desktop client for backend integration.
 npm run dev
 ```
 
+## UI modes
+
+- `User` mode (default): simple interview copilot UI for end users.
+- `Dev` mode: reveals diagnostics, internal counters, and reliability logs.
+
+Mode selection is persisted locally in the desktop app.
+
+## Smoke test
+
+After backend is running:
+
+```bash
+npm run smoke
+```
+
+Detailed validation checklist:
+
+- `frontend/docs/phase8-validation-and-handoff.md`
+
 ## Real Audio (Native Loopback)
 
 The app supports two audio modes:

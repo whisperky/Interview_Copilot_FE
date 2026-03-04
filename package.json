@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "build:web": "vite build",
     "lint": "eslint .",
+    "smoke": "node ./scripts/integration-smoke.mjs",
     "preview": "vite preview",
     "preview:web": "vite preview",
     "start:electron": "electron ."
