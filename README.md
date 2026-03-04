@@ -1,73 +1,38 @@
-# React + TypeScript + Vite
+# Frontend Desktop App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Electron + React + Tailwind v4 desktop client for backend integration.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Real Audio (Native Loopback)
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The app supports two audio modes:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- `native` when a WASAPI loopback addon is available
+- `mock` fallback when no addon is available
+
+To enable native mode, provide a `.node` addon by either:
+
+1. Setting environment variable `LOOPBACK_ADDON_PATH` to an absolute or relative `.node` file path
+2. Placing addon at one of:
+   - `frontend/native/loopback.node`
+   - `frontend/native/loopback-addon.node`
+
+### Supported addon APIs
+
+The Electron main process accepts one of these exports:
+
+1. `createLoopbackCapture({ sampleRate, channels, onChunk, onError })`
+   - returns controller with `start()` and optional `stop()`, or returns a stop function
+2. `startLoopback({ sampleRate, channels, onChunk, onError })`
+   - returns controller with optional `stop()` or a stop function
+3. `start({ sampleRate, channels, onChunk, onError })`
+   - same return contract as above
+
+`onChunk` must provide PCM16 mono audio bytes at 16kHz (Buffer or Uint8Array).
+
+If addon load/start fails, the app automatically switches to `mock` and shows the reason in UI.

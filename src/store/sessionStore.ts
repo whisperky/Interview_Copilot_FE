@@ -40,12 +40,26 @@ interface AudioSlice {
   warning: string | null
 }
 
+export interface DiagnosticEvent {
+  id: string
+  timestamp: string
+  level: 'info' | 'warn' | 'error'
+  message: string
+}
+
+interface DiagnosticsSlice {
+  events: DiagnosticEvent[]
+  lastStatusChangeAt: string | null
+  connectedSince: string | null
+}
+
 interface SessionStore {
   connection: ConnectionSlice
   session: SessionSlice
   transcript: TranscriptSlice
   answer: AnswerSlice
   audio: AudioSlice
+  diagnostics: DiagnosticsSlice
   lastServerEvent: string
   setConnectionStatus: (status: SessionConnectionStatus, retries: number, error?: string) => void
   setConnectionError: (error: string | null) => void
@@ -56,6 +70,8 @@ interface SessionStore {
   recordAudioChunkSent: (bytes: number) => void
   recordAudioChunkDropped: () => void
   applyServerMessage: (message: ServerWsMessage, formattedEvent: string) => void
+  pushDiagnosticEvent: (level: DiagnosticEvent['level'], message: string) => void
+  clearDiagnosticEvents: () => void
 }
 
 const initialPreferences: SessionPreferences = {
@@ -64,6 +80,18 @@ const initialPreferences: SessionPreferences = {
   include_example: true,
   technical_mode: false,
   simplify_english: false,
+}
+
+const MAX_DIAGNOSTIC_EVENTS = 80
+
+function createDiagnosticEvent(level: DiagnosticEvent['level'], message: string): DiagnosticEvent {
+  const id = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+  return {
+    id,
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+  }
 }
 
 export const useSessionStore = create<SessionStore>((set) => ({
@@ -95,6 +123,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
     chunksDropped: 0,
     warning: null,
   },
+  diagnostics: {
+    events: [],
+    lastStatusChangeAt: null,
+    connectedSince: null,
+  },
   lastServerEvent: 'none',
   setConnectionStatus: (status, retries, error) =>
     set((state) => ({
@@ -104,6 +137,18 @@ export const useSessionStore = create<SessionStore>((set) => ({
         retries,
         lastError: error ?? state.connection.lastError,
       },
+      diagnostics: {
+        ...state.diagnostics,
+        lastStatusChangeAt: new Date().toISOString(),
+        connectedSince: status === 'connected' ? new Date().toISOString() : null,
+        events: [
+          ...state.diagnostics.events,
+          createDiagnosticEvent(
+            error ? 'warn' : 'info',
+            `connection status -> ${status}${error ? ` (${error})` : ''}`
+          ),
+        ].slice(-MAX_DIAGNOSTIC_EVENTS),
+      },
     })),
   setConnectionError: (error) =>
     set((state) => ({
@@ -111,6 +156,15 @@ export const useSessionStore = create<SessionStore>((set) => ({
         ...state.connection,
         lastError: error,
       },
+      diagnostics: error
+        ? {
+            ...state.diagnostics,
+            events: [
+              ...state.diagnostics.events,
+              createDiagnosticEvent('error', error),
+            ].slice(-MAX_DIAGNOSTIC_EVENTS),
+          }
+        : state.diagnostics,
     })),
   setPreferences: (preferences) =>
     set((state) => ({
@@ -143,6 +197,16 @@ export const useSessionStore = create<SessionStore>((set) => ({
         mode,
         active,
         warning: warning ?? state.audio.warning,
+      },
+      diagnostics: {
+        ...state.diagnostics,
+        events: [
+          ...state.diagnostics.events,
+          createDiagnosticEvent(
+            warning ? 'warn' : 'info',
+            `audio status -> ${mode}${warning ? ` (${warning})` : ''}`
+          ),
+        ].slice(-MAX_DIAGNOSTIC_EVENTS),
       },
     })),
   recordAudioChunkSent: (bytes) =>
@@ -222,7 +286,40 @@ export const useSessionStore = create<SessionStore>((set) => ({
         }
       }
 
+      if (
+        message.type === WS_EVENT_TYPES.questionDetected ||
+        message.type === WS_EVENT_TYPES.answerStart ||
+        message.type === WS_EVENT_TYPES.answerDone ||
+        message.type === WS_EVENT_TYPES.error
+      ) {
+        const level: DiagnosticEvent['level'] = message.type === WS_EVENT_TYPES.error ? 'error' : 'info'
+        next.diagnostics = {
+          ...state.diagnostics,
+          events: [
+            ...state.diagnostics.events,
+            createDiagnosticEvent(level, `server event: ${formattedEvent}`),
+          ].slice(-MAX_DIAGNOSTIC_EVENTS),
+        }
+      }
+
       return next
     }),
+  pushDiagnosticEvent: (level, message) =>
+    set((state) => ({
+      diagnostics: {
+        ...state.diagnostics,
+        events: [
+          ...state.diagnostics.events,
+          createDiagnosticEvent(level, message),
+        ].slice(-MAX_DIAGNOSTIC_EVENTS),
+      },
+    })),
+  clearDiagnosticEvents: () =>
+    set((state) => ({
+      diagnostics: {
+        ...state.diagnostics,
+        events: [],
+      },
+    })),
 }))
 

@@ -28,11 +28,13 @@ function App() {
     degraded: true,
   })
   const [testTranscript, setTestTranscript] = useState('What is your biggest strength?')
+  const [nowMs, setNowMs] = useState(Date.now())
   const connection = useSessionStore((state) => state.connection)
   const session = useSessionStore((state) => state.session)
   const transcript = useSessionStore((state) => state.transcript)
   const answer = useSessionStore((state) => state.answer)
   const audio = useSessionStore((state) => state.audio)
+  const diagnostics = useSessionStore((state) => state.diagnostics)
   const lastServerEvent = useSessionStore((state) => state.lastServerEvent)
   const setConnectionStatus = useSessionStore((state) => state.setConnectionStatus)
   const setConnectionError = useSessionStore((state) => state.setConnectionError)
@@ -42,6 +44,14 @@ function App() {
   const recordAudioChunkDropped = useSessionStore((state) => state.recordAudioChunkDropped)
   const applyServerMessage = useSessionStore((state) => state.applyServerMessage)
   const setResumeContext = useSessionStore((state) => state.setResumeContext)
+  const pushDiagnosticEvent = useSessionStore((state) => state.pushDiagnosticEvent)
+  const clearDiagnosticEvents = useSessionStore((state) => state.clearDiagnosticEvents)
+  const canSendWs = connection.status === 'connected'
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     let isMounted = true
@@ -60,6 +70,10 @@ function App() {
       window.clearInterval(id)
     }
   }, [apiBaseUrl])
+
+  useEffect(() => {
+    pushDiagnosticEvent('info', `health snapshot -> ${health.ready ? 'ready' : 'degraded'}`)
+  }, [health.ready, pushDiagnosticEvent])
 
   useEffect(() => {
     if (!hasDesktopApi) return
@@ -120,10 +134,12 @@ function App() {
   }
 
   const connectSession = () => {
+    pushDiagnosticEvent('info', 'manual action: connect ws')
     clientRef.current?.connect()
   }
 
   const disconnectSession = () => {
+    pushDiagnosticEvent('warn', 'manual action: disconnect ws')
     clientRef.current?.disconnect()
   }
 
@@ -273,14 +289,16 @@ function App() {
 
           <div className="grid grid-cols-2 gap-2">
             <button
-              className="rounded bg-emerald-700 px-2 py-1 hover:bg-emerald-600"
+              className="rounded bg-emerald-700 px-2 py-1 hover:bg-emerald-600 disabled:opacity-50"
+              disabled={connection.status === 'connected' || connection.status === 'connecting'}
               onClick={connectSession}
               type="button"
             >
               Connect WS
             </button>
             <button
-              className="rounded bg-zinc-700 px-2 py-1 hover:bg-zinc-600"
+              className="rounded bg-zinc-700 px-2 py-1 hover:bg-zinc-600 disabled:opacity-50"
+              disabled={connection.status === 'closed' || connection.status === 'idle'}
               onClick={disconnectSession}
               type="button"
             >
@@ -332,7 +350,12 @@ function App() {
                 type="checkbox"
               />
             </label>
-            <button className="w-full rounded bg-blue-700 px-2 py-1 hover:bg-blue-600" onClick={sendPreferences} type="button">
+            <button
+              className="w-full rounded bg-blue-700 px-2 py-1 hover:bg-blue-600 disabled:opacity-50"
+              disabled={!canSendWs}
+              onClick={sendPreferences}
+              type="button"
+            >
               Send Preferences
             </button>
           </div>
@@ -346,7 +369,12 @@ function App() {
               rows={3}
               value={session.resumeContext}
             />
-            <button className="w-full rounded bg-blue-700 px-2 py-1 hover:bg-blue-600" onClick={sendResumeContext} type="button">
+            <button
+              className="w-full rounded bg-blue-700 px-2 py-1 hover:bg-blue-600 disabled:opacity-50"
+              disabled={!canSendWs}
+              onClick={sendResumeContext}
+              type="button"
+            >
               Send Resume Context
             </button>
           </div>
@@ -359,13 +387,69 @@ function App() {
               value={testTranscript}
             />
             <div className="grid grid-cols-2 gap-2">
-              <button className="rounded bg-purple-700 px-2 py-1 hover:bg-purple-600" onClick={sendTranscriptTest} type="button">
+              <button
+                className="rounded bg-purple-700 px-2 py-1 hover:bg-purple-600 disabled:opacity-50"
+                disabled={!canSendWs}
+                onClick={sendTranscriptTest}
+                type="button"
+              >
                 Send Test Transcript
               </button>
-              <button className="rounded bg-purple-700 px-2 py-1 hover:bg-purple-600" onClick={sendAnswerNow} type="button">
+              <button
+                className="rounded bg-purple-700 px-2 py-1 hover:bg-purple-600 disabled:opacity-50"
+                disabled={!canSendWs}
+                onClick={sendAnswerNow}
+                type="button"
+              >
                 Answer Now
               </button>
             </div>
+          </div>
+        </section>
+
+        <section className="space-y-3 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+          <div className="flex items-center justify-between">
+            <p className="text-zinc-400">Phase 6: Live Session View</p>
+            <span className="rounded bg-zinc-800 px-2 py-1">
+              answer {answer.isStreaming ? 'streaming' : 'idle'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <article className="rounded border border-zinc-800 p-2">
+              <p className="mb-2 text-zinc-400">Transcript</p>
+              <p className="text-zinc-500">
+                interim: {transcript.interimText || 'none'}
+              </p>
+              <div className="mt-2 max-h-24 space-y-1 overflow-auto">
+                {transcript.finalSegments.length === 0 && (
+                  <p className="text-zinc-500">No final transcript yet.</p>
+                )}
+                {transcript.finalSegments.slice(-5).map((segment, idx) => (
+                  <p key={`${segment}-${idx}`} className="rounded bg-zinc-900 px-2 py-1">
+                    {segment}
+                  </p>
+                ))}
+              </div>
+            </article>
+
+            <article className="rounded border border-zinc-800 p-2">
+              <p className="mb-2 text-zinc-400">Detected Question</p>
+              <p className="rounded bg-zinc-900 px-2 py-1">
+                {session.detectedQuestion ?? 'none'}
+              </p>
+              <p className="mt-2 text-zinc-500">
+                category: {session.detectedCategory ?? 'none'}
+              </p>
+            </article>
+
+            <article className="rounded border border-zinc-800 p-2">
+              <p className="mb-2 text-zinc-400">Answer</p>
+              <p className="max-h-24 overflow-auto rounded bg-zinc-900 px-2 py-1">
+                {answer.current || 'No generated answer yet.'}
+              </p>
+              <p className="mt-2 text-zinc-500">history: {answer.history.length}</p>
+            </article>
           </div>
         </section>
 
@@ -420,6 +504,40 @@ function App() {
           <p>answer streaming: {answer.isStreaming ? 'yes' : 'no'}</p>
           <p>answer history: {answer.history.length}</p>
         </section>
+
+        <section className="space-y-2 rounded-lg border border-zinc-800 p-3 text-xs text-zinc-300">
+          <div className="flex items-center justify-between">
+            <p className="text-zinc-400">Phase 7: Reliability and Observability</p>
+            <button
+              className="rounded bg-zinc-800 px-2 py-1 hover:bg-zinc-700"
+              onClick={clearDiagnosticEvents}
+              type="button"
+            >
+              Clear Logs
+            </button>
+          </div>
+          <p className="text-zinc-500">
+            last status change: {formatIsoTime(diagnostics.lastStatusChangeAt)}
+            {' '}| connected for:{' '}
+            {formatDuration(diagnostics.connectedSince, nowMs)}
+          </p>
+          <div className="max-h-32 space-y-1 overflow-auto rounded border border-zinc-800 p-2">
+            {diagnostics.events.length === 0 && (
+              <p className="text-zinc-500">No events yet.</p>
+            )}
+            {diagnostics.events.slice(-25).map((event) => (
+              <p key={event.id}>
+                <span className={event.level === 'error' ? 'text-red-300' : event.level === 'warn' ? 'text-amber-300' : 'text-emerald-300'}>
+                  {event.level.toUpperCase()}
+                </span>
+                {' '}
+                <span className="text-zinc-500">[{formatIsoTime(event.timestamp)}]</span>
+                {' '}
+                {event.message}
+              </p>
+            ))}
+          </div>
+        </section>
       </main>
     </div>
   )
@@ -443,6 +561,24 @@ function formatServerEvent(message: ServerWsMessage): string {
       return `test_ok: ${message.message}`
   }
   return 'unknown'
+}
+
+function formatIsoTime(value: string | null): string {
+  if (!value) return 'n/a'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleTimeString()
+}
+
+function formatDuration(connectedSince: string | null, nowEpochMs: number): string {
+  if (!connectedSince) return '0s'
+  const since = new Date(connectedSince).getTime()
+  if (Number.isNaN(since) || nowEpochMs < since) return '0s'
+  const elapsedSec = Math.floor((nowEpochMs - since) / 1000)
+  const mins = Math.floor(elapsedSec / 60)
+  const secs = elapsedSec % 60
+  if (mins === 0) return `${secs}s`
+  return `${mins}m ${secs}s`
 }
 
 export default App

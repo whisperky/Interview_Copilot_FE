@@ -1,0 +1,17 @@
+{
+  "name": "loopback-native-addon",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "install": "node -e \"console.log('skip auto build; use npm run build')\"",
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.1"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.4.2"
+  }
+}
